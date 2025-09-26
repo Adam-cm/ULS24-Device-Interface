@@ -236,10 +236,15 @@ class ULS24Device:
         self.debug_print(f"Selecting sensor channel {channel}")
         self.current_channel = channel
         
-        # Create the command
+        # Create command to match C++ TrimReader::SelSensor format
         tx_data = bytearray(self.TX_BUFFER_SIZE)
-        tx_data[0] = 0x03  # Sensor select command
+        
+        # Based on TrimReader.cpp implementation
+        tx_data[0] = 0x03  # Command code for SelSensor
         tx_data[1] = channel
+        
+        # Show detailed command being sent
+        self.debug_print(f"Command bytes: {' '.join(f'{b:02x}' for b in tx_data[:10])}")
         
         # Send the command
         result = self.write_hid_report(tx_data)

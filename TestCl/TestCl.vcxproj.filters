@@ -21,6 +21,9 @@
     <None Include="uls24_cli.py" />
     <None Include="PYTHON_README.md" />
     <None Include="..\.gitignore" />
+    <None Include="test_device.py" />
+    <None Include="diagnose_device.py" />
+    <None Include="raw_hid_test.py" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h">

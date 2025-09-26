@@ -1,2 +1,10 @@
-﻿  HidMgr.cpp
-  TestCl.vcxproj -> C:\Users\Adam1\source\repos\SimpleWrapper\Debug\TestCl.exe
+﻿  c_sample.cpp
+C:\Users\Adam1\source\repos\SimpleWrapper\TestCl\c_sample.cpp(64,1): error C1010: unexpected end of file while looking for precompiled header. Did you forget to add '#include "stdafx.h"' to your source?
+  InterfaceWrapper.cpp
+C:\Users\Adam1\source\repos\SimpleWrapper\TestCl\InterfaceWrapper.cpp(112,1): error C1010: unexpected end of file while looking for precompiled header. Did you forget to add '#include "stdafx.h"' to your source?
+  TestCl.cpp
+  TrimReader.cpp
+C:\Users\Adam1\source\repos\SimpleWrapper\TestCl\TrimReader.cpp(88,11): warning C4244: 'initializing': conversion from 'ULONGLONG' to 'DWORD', possible loss of data
+  (compiling source file '/TrimReader.cpp')
+  
+  Generating Code...

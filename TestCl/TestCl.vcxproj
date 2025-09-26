@@ -82,10 +82,13 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="..\.gitignore" />
+    <None Include="diagnose_device.py" />
     <None Include="example_script.py" />
     <None Include="python_hid_wrapper.py" />
     <None Include="PYTHON_README.md" />
+    <None Include="raw_hid_test.py" />
     <None Include="ReadMe.txt" />
+    <None Include="test_device.py" />
     <None Include="uls24_cli.py" />
   </ItemGroup>
   <ItemGroup>
