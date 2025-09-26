@@ -32,5 +32,6 @@
 
 #include <atlbase.h>
 #include <atlstr.h>
+#include "hidapi.h" // Added for hidapi support
 
 // TODO: reference additional headers your program requires here
