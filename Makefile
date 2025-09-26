@@ -2,7 +2,7 @@
 
 # Compiler settings
 CXX = g++
-CXXFLAGS = -std=c++14 -fPIC -Wall -I.
+CXXFLAGS = -std=c++14 -fPIC -Wall -I. -DLINUX
 
 # Target library name
 LIB_NAME = ULSLIB.so
@@ -10,7 +10,6 @@ SAMPLE_NAME = uls24_sample
 
 # Source files
 SRC_FILES = TestCl/HidMgr.cpp TestCl/InterfaceObj.cpp TestCl/TrimReader.cpp TestCl/hidapi.cpp TestCl/InterfaceWrapper.cpp
-SAMPLE_SRC = TestCl/c_sample.cpp
 
 # Object files
 OBJ_FILES = $(SRC_FILES:.cpp=.o)
@@ -26,8 +25,8 @@ $(LIB_NAME): $(OBJ_FILES)
 	$(CXX) -shared -o $@ $^ $(LIBS)
 
 # Rule to build the sample program
-$(SAMPLE_NAME): $(SAMPLE_SRC) $(LIB_NAME)
-	$(CXX) $(CXXFLAGS) -o $@ $< -L. -lULSLIB $(LIBS) -Wl,-rpath,--disable-new-dtags.
+$(SAMPLE_NAME): TestCl/c_sample.cpp $(LIB_NAME)
+	$(CXX) $(CXXFLAGS) -o $@ $< -L. -lULSLIB $(LIBS) -Wl,-rpath,.
 
 # Rule to compile source files
 %.o: %.cpp
@@ -47,4 +46,4 @@ deps:
 	apt-get update
 	apt-get install -y libhidapi-dev
 
-.PHONY: all clean install deps
+.PHONY: all clean install deps.PHONY: all clean install deps
