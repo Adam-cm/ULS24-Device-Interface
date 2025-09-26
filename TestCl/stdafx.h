@@ -8,6 +8,9 @@
 #include "targetver.h"
 
 #include <stdio.h>
+
+#ifdef _WIN32
+// Windows-specific includes
 #include <tchar.h>
 #define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS      // some CString constructors will be explicit
 
@@ -25,13 +28,19 @@
 #include <afxcmn.h>                     // MFC support for Windows Common Controls
 #endif // _AFX_NO_AFXCMN_SUPPORT
 
-#include <iostream>
-
-
 #define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS      // some CString constructors will be explicit
 
 #include <atlbase.h>
 #include <atlstr.h>
-#include "hidapi.h" // Added for hidapi support
+
+#else
+// Non-Windows includes and definitions
+#include "win_compatibility.h"
+#endif
+
+#include <iostream>
+
+// Added for hidapi support
+#include "hidapi.h"
 
 // TODO: reference additional headers your program requires here

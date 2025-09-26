@@ -16,6 +16,11 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="ReadMe.txt" />
+    <None Include="python_hid_wrapper.py" />
+    <None Include="example_script.py" />
+    <None Include="uls24_cli.py" />
+    <None Include="PYTHON_README.md" />
+    <None Include="..\.gitignore" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h">
@@ -48,6 +53,12 @@
     <ClInclude Include="InterfaceObj.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="hidapi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="win_compatibility.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -63,6 +74,15 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="InterfaceObj.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="hidapi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="InterfaceWrapper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="c_sample.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

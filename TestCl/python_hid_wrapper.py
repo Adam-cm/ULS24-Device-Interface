@@ -5,6 +5,10 @@ Python wrapper for HID device communication, replicating the functionality in Te
 import sys
 import time
 import hid  # pip install hidapi
+import traceback
+
+# Debug flag - set to True for verbose output
+DEBUG = True
 
 class ULS24Device:
     """Class to interface with ULS24 device using HID communication"""
@@ -20,7 +24,7 @@ class ULS24Device:
     GET_CMD = 0x02
     READ_CMD = 0x04
     
-    def __init__(self):
+    def __init__(self, debug=DEBUG):
         self.device = None
         self.frame_data = [[0 for _ in range(24)] for _ in range(24)]
         self.gain_mode = 0
@@ -28,12 +32,28 @@ class ULS24Device:
         self.frame_size = 0  # 0: 12x12 frame; 1: 24x24 frame
         self.current_channel = 1
         self.continue_flag = False
+        self.debug = debug
+    
+    def debug_print(self, message):
+        """Print debug messages if debug mode is enabled"""
+        if self.debug:
+            print(f"DEBUG: {message}")
     
     def find_device(self):
         """Find and open the ULS24 device"""
         try:
+            # List available devices for debugging
+            if self.debug:
+                print("Enumerating all HID devices:")
+                for device_info in hid.enumerate():
+                    print(f"  VID: {device_info['vendor_id']:04x}, "
+                          f"PID: {device_info['product_id']:04x}, "
+                          f"Path: {device_info['path']}")
+            
             # Initialize the device
+            self.debug_print("Initializing HID device...")
             self.device = hid.device()
+            self.debug_print(f"Looking for device with VID: {self.VENDOR_ID:04x}, PID: {self.PRODUCT_ID:04x}")
             self.device.open(self.VENDOR_ID, self.PRODUCT_ID)
             
             # Set some device properties
@@ -45,16 +65,26 @@ class ULS24Device:
             return True
         except IOError as e:
             print(f"Error opening device: {e}")
+            traceback.print_exc()
+            return False
+        except Exception as e:
+            print(f"Unexpected error opening device: {e}")
+            traceback.print_exc()
             return False
     
     def close(self):
         """Close the device"""
         if self.device:
-            self.device.close()
-            self.device = None
+            try:
+                self.debug_print("Closing device")
+                self.device.close()
+            except Exception as e:
+                print(f"Error closing device: {e}")
+            finally:
+                self.device = None
     
-    def write_hid_report(self, tx_data):
-        """Write data to device"""
+    def write_hid_report(self, tx_data, timeout_ms=1000):
+        """Write data to device with timeout"""
         if not self.device:
             print("Device not open")
             return False
@@ -67,15 +97,24 @@ class ULS24Device:
         for i in range(min(len(tx_data), self.TX_BUFFER_SIZE)):
             output_report[i + 1] = tx_data[i]
         
-        # Send the report
+        # Debug print output report
+        if self.debug:
+            hex_data = ' '.join([f"{b:02x}" for b in output_report[:10]]) + " ..."
+            self.debug_print(f"Writing data: {hex_data}")
+        
+        # Send the report with timeout
         try:
+            start_time = time.time()
             self.device.write(output_report)
+            elapsed = (time.time() - start_time) * 1000
+            if elapsed > timeout_ms:
+                self.debug_print(f"Write took longer than expected: {elapsed:.1f}ms")
             return True
         except IOError as e:
             print(f"Error writing to device: {e}")
             return False
     
-    def read_hid_report(self, timeout_ms=264000):
+    def read_hid_report(self, timeout_ms=5000):
         """Read data from device with timeout"""
         if not self.device:
             print("Device not open")
@@ -83,17 +122,31 @@ class ULS24Device:
         
         try:
             # Read with timeout
+            self.debug_print(f"Reading with timeout of {timeout_ms}ms")
             start_time = time.time()
+            
+            # Try to read until timeout
             while (time.time() - start_time) * 1000 < timeout_ms:
-                # Read the report (blocking)
-                data = self.device.read(self.HID_REPORT_SIZE)
+                # Read the report
+                data = self.device.read(self.HID_REPORT_SIZE, timeout_ms=100)
+                
                 if data:
+                    elapsed = (time.time() - start_time) * 1000
+                    self.debug_print(f"Read completed in {elapsed:.1f}ms")
+                    
+                    # Debug print received data
+                    if self.debug:
+                        hex_data = ' '.join([f"{b:02x}" for b in data[:10]]) + " ..."
+                        self.debug_print(f"Received data: {hex_data}")
+                    
                     # Process the received data
                     rx_data = data[1:]  # Skip report ID
                     
                     if len(rx_data) >= 5:
                         r_cmd = rx_data[2]
                         r_type = rx_data[4]
+                        
+                        self.debug_print(f"Received command: {r_cmd:02x}, type: {r_type:02x}")
                         
                         if r_cmd == self.GET_CMD:
                             if r_type in [0x01, 0x02, 0x12, 0x22, 0x32, 0x03]:
@@ -116,9 +169,9 @@ class ULS24Device:
                     return rx_data
                 
                 # Small delay to prevent CPU hogging
-                time.sleep(0.001)
+                time.sleep(0.01)
             
-            print("Read timeout")
+            self.debug_print(f"Read timeout after {timeout_ms}ms")
             return None
         
         except IOError as e:
@@ -128,10 +181,13 @@ class ULS24Device:
     def process_row_data(self, rx_data):
         """Process received data, similar to ProcessRowData in C++ code"""
         if not rx_data or len(rx_data) < 6:
+            self.debug_print("Invalid or incomplete data received")
             return
         
         r_type = rx_data[4]
         r_row = rx_data[5]
+        
+        self.debug_print(f"Processing row data: type={r_type:02x}, row={r_row}")
         
         if r_type == 0x01:  # 12x12 data
             self.frame_size = 0
@@ -177,6 +233,7 @@ class ULS24Device:
             print(f"Invalid channel: {channel}")
             return False
         
+        self.debug_print(f"Selecting sensor channel {channel}")
         self.current_channel = channel
         
         # Create the command
@@ -187,8 +244,11 @@ class ULS24Device:
         # Send the command
         result = self.write_hid_report(tx_data)
         if result:
-            # Read the response
-            self.read_hid_report()
+            # Read the response with shorter timeout for simple commands
+            self.debug_print("Reading response after sensor selection")
+            rx_data = self.read_hid_report(timeout_ms=2000)
+            if rx_data is None:
+                self.debug_print("No response received for sensor selection, continuing anyway")
         return result
     
     def set_int_time(self, int_time_ms):
@@ -197,6 +257,7 @@ class ULS24Device:
             print(f"Invalid integration time: {int_time_ms}")
             return False
         
+        self.debug_print(f"Setting integration time to {int_time_ms}ms")
         self.int_time = float(int_time_ms)
         
         # Create the command (the format will depend on your device protocol)
@@ -212,8 +273,11 @@ class ULS24Device:
         # Send the command
         result = self.write_hid_report(tx_data)
         if result:
-            # Read the response
-            self.read_hid_report()
+            # Read the response with shorter timeout for simple commands
+            self.debug_print("Reading response after setting integration time")
+            rx_data = self.read_hid_report(timeout_ms=2000)
+            if rx_data is None:
+                self.debug_print("No response received for integration time, continuing anyway")
         return result
     
     def set_gain_mode(self, gain):
@@ -222,6 +286,7 @@ class ULS24Device:
             print(f"Invalid gain mode: {gain}")
             return False
         
+        self.debug_print(f"Setting gain mode to {'low' if gain else 'high'} ({gain})")
         self.gain_mode = gain
         
         # Create the command
@@ -232,8 +297,11 @@ class ULS24Device:
         # Send the command
         result = self.write_hid_report(tx_data)
         if result:
-            # Read the response
-            self.read_hid_report()
+            # Read the response with shorter timeout for simple commands
+            self.debug_print("Reading response after setting gain mode")
+            rx_data = self.read_hid_report(timeout_ms=2000)
+            if rx_data is None:
+                self.debug_print("No response received for gain mode, continuing anyway")
         return result
     
     def capture_frame(self, channel=None):
@@ -245,6 +313,8 @@ class ULS24Device:
             print(f"Invalid channel: {channel}")
             return False
         
+        self.debug_print(f"Capturing frame from channel {channel}")
+        
         # Create the capture command
         tx_data = bytearray(self.TX_BUFFER_SIZE)
         tx_data[0] = 0x01  # Capture command for 12x12
@@ -255,16 +325,25 @@ class ULS24Device:
         if not result:
             return False
         
-        # Process data row by row
+        # Process data row by row with timeout
+        max_attempts = 20  # Maximum number of read attempts
         self.continue_flag = True
-        while self.continue_flag:
-            rx_data = self.read_hid_report()
+        attempts = 0
+        
+        self.debug_print("Starting frame capture loop")
+        while self.continue_flag and attempts < max_attempts:
+            attempts += 1
+            self.debug_print(f"Read attempt {attempts}/{max_attempts}")
+            
+            rx_data = self.read_hid_report(timeout_ms=5000)
             if rx_data:
                 self.process_row_data(rx_data)
             else:
+                self.debug_print("No data received, breaking capture loop")
                 self.continue_flag = False
         
-        return True
+        self.debug_print(f"Frame capture completed after {attempts} read attempts")
+        return attempts > 0
     
     def print_data(self):
         """Print the captured frame data"""
@@ -277,7 +356,7 @@ class ULS24Device:
 
 def main():
     """Main function to demonstrate usage"""
-    device = ULS24Device()
+    device = ULS24Device(debug=True)
     
     if not device.find_device():
         print("Device not found")
@@ -285,47 +364,16 @@ def main():
     
     print("Device found")
     
-    # Initialize device
-    # This would normally load trim data and reset trim like in the C++ code
-    # device.read_trim_data()
-    # device.reset_trim()
-    
     # Set some initial parameters
     device.sel_sensor(1)
     device.set_int_time(30)  # 30ms
     device.set_gain_mode(1)  # low gain mode
     
-    print("allowable commands are: selchan, get, setinttime, setgain, reset, exit...")
+    # Capture a frame
+    device.capture_frame(1)
+    device.print_data()
     
-    while True:
-        command = input("> ")
-        
-        if command == "selchan":
-            channel = int(input("chan: "))
-            device.sel_sensor(channel)
-        
-        elif command == "get":
-            device.capture_frame()
-            device.print_data()
-        
-        elif command == "setinttime":
-            int_time = int(input("int time: "))
-            device.set_int_time(int_time)
-        
-        elif command == "setgain":
-            gain = int(input("gain (0-high, 1-low): "))
-            device.set_gain_mode(gain)
-        
-        elif command == "reset":
-            found = device.find_device()
-            if found:
-                print("Device found")
-            else:
-                print("Device not found")
-        
-        elif command == "exit":
-            break
-    
+    # Close the device
     device.close()
     print("Done.")
     return 0

@@ -12,7 +12,40 @@ This directory contains Python scripts for interfacing with the ULS24 device usi
 1. Install the required Python package:
 
 ```bash
+# On Windows/macOS:
 pip install hidapi
+
+# On newer Linux distributions (Python 3.11+) use one of these options:
+# Option 1: Create a virtual environment (recommended)
+python3 -m venv uls24_env
+source uls24_env/bin/activate
+pip install hidapi
+
+# Option 2: Install for current user only
+pip install --user hidapi
+
+# Option 3: Force system-wide installation (not recommended)
+pip install --break-system-packages hidapi
+
+# Option 4: Use apt if available
+sudo apt-get install python3-hid
+```
+
+2. On Linux, you may need to add udev rules for USB device access:
+
+```bash
+sudo bash -c 'cat > /etc/udev/rules.d/99-hidapi.rules << EOF
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5750", MODE="0666"
+EOF'
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+3. Also on Linux, add your user to the appropriate groups:
+
+```bash
+sudo usermod -a -G plugdev,dialout $USER
+# Log out and back in for this to take effect
 ```
 
 ## Files
@@ -20,6 +53,8 @@ pip install hidapi
 - `python_hid_wrapper.py`: Contains the `ULS24Device` class that handles communication with the device
 - `example_script.py`: Example script demonstrating a sequence of operations with the device
 - `uls24_cli.py`: Command-line interface script for controlling the device
+- `test_device.py`: Simple test script to verify basic device functionality
+- `diagnose_device.py`: Diagnostic tool to help identify USB/HID device issues (Linux only)
 
 ## Usage
 
@@ -97,6 +132,74 @@ python uls24_cli.py --setgain 0 --get --channel 3 --output frame_data.txt
 # Reset the device
 python uls24_cli.py --reset
 ```
+
+## Troubleshooting
+
+If you encounter issues with the device:
+
+### 1. Run the Diagnostic Tool
+
+The diagnostic tool can help identify USB/HID device issues:
+
+```bash
+python diagnose_device.py
+```
+
+This will check:
+- Python and hidapi installation
+- User permissions
+- USB device presence
+- Device file permissions
+- Loaded kernel modules
+- Whether the device can be opened
+
+### 2. Run the Simple Test Script
+
+The test script performs basic functionality tests step by step:
+
+```bash
+python test_device.py
+```
+
+### 3. Enable Debug Mode
+
+You can enable debug mode in the ULS24Device class:
+
+```python
+device = ULS24Device(debug=True)
+```
+
+Or modify the scripts to set `DEBUG = True` at the top of python_hid_wrapper.py.
+
+### Common Issues and Solutions
+
+1. **Device Not Found**
+   - Make sure the device is properly connected
+   - Check USB cable and port
+   - Verify device appears in `lsusb` output (on Linux)
+   - Try a different USB port
+
+2. **Permission Denied**
+   - Add udev rules as described in the Installation section
+   - Add your user to the appropriate groups
+   - Try running the script with sudo as a temporary solution
+
+3. **Script Freezes After Connection**
+   - The device might not be responding to commands
+   - Check power supply to the device
+   - Verify that the device is properly initialized
+   - Try unplugging and reconnecting the device
+   - Run the diagnostic tool to check if the device can be opened
+
+4. **Error: No Module Named 'hid'**
+   - Install the hidapi package as described in the Installation section
+   - If using a virtual environment, make sure it's activated
+   - On newer Linux distributions, use one of the installation options provided
+
+5. **Unable to Open Device**
+   - Check if the device is already in use by another program
+   - Verify that the correct VID/PID is being used (default: 0x0483/0x5750)
+   - Try closing all other applications that might be using the device
 
 ## Command Details
 

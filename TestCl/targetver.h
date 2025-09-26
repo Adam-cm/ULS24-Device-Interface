@@ -1,8 +1,12 @@
 #pragma once
 
-// Including SDKDDKVer.h defines the highest available Windows platform.
+// The following macros define the minimum required platform.
+// The minimum required platform is the earliest version of Windows, Internet Explorer etc. that has the necessary features to run 
+// your application. The macros work by enabling all features available on platform versions up to and including the version specified.
 
-// If you wish to build your application for a previous Windows platform, include WinSDKVer.h and
-// set the _WIN32_WINNT macro to the platform you wish to support before including SDKDDKVer.h.
-
+#ifdef _WIN32
+// Include SDKDDKVer.h to define Windows platform specific macros
 #include <SDKDDKVer.h>
+#else
+// For Linux and other platforms, we don't need these Windows-specific defines
+#endif

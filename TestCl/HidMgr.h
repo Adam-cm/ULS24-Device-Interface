@@ -3,18 +3,23 @@
 
 #pragma once
 
+#ifdef _WIN32
 #include <wtypes.h>
 #include <initguid.h>
+#else
+#include "win_compatibility.h"
+#endif
+
 #include "hidapi.h"
 
-#define TxNum 64		// the number of the buffer for sent data to HID
-#define RxNum 64		// the number of the buffer for received data from HID
+#define TxNum 64        // the number of the buffer for sent data to HID
+#define RxNum 64        // the number of the buffer for received data from HID
 
-#define HIDREPORTNUM 64+1		//	HID report num bytes
+#define HIDREPORTNUM 64+1        //  HID report num bytes
 #define HIDBUFSIZE 12
 
-#define GetCmd		0x02			// return 0x02 command 
-#define ReadCmd		0x04			// Read command
+#define GetCmd      0x02            // return 0x02 command 
+#define ReadCmd     0x04            // Read command
 
 // Function declarations
 bool FindTheHID();
