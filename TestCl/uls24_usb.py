@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-Python wrapper for HID device communication, replicating the functionality in TestCl.cpp
+Alternative ULS24 device interface using PyUSB instead of hidapi
+For systems where hidraw kernel module is not available
 """
 import sys
 import time
-import traceback
 import struct
-import hid  # pip install hidapi
+import usb.core
+import usb.util
 
 # Debug flag - set to True for verbose output
 DEBUG = True
 
-class ULS24Device:
-    """Class to interface with ULS24 device using HID communication"""
+class ULS24DeviceUSB:
+    """Class to interface with ULS24 device using direct USB communication"""
     
     # Constants from C++ code
     VENDOR_ID = 0x0483
     PRODUCT_ID = 0x5750
     TX_BUFFER_SIZE = 64
     RX_BUFFER_SIZE = 64
-    HID_REPORT_SIZE = 65  # 64 + 1 for report ID
     
     # Protocol constants from TrimReader.cpp
     PREAMBLE_CODE = 0xaa
@@ -46,6 +46,9 @@ class ULS24Device:
     
     def __init__(self, debug=DEBUG):
         self.device = None
+        self.ep_out = None
+        self.ep_in = None
+        self.interface = None
         self.frame_data = [[0 for _ in range(24)] for _ in range(24)]
         self.gain_mode = 0
         self.int_time = 1.0
@@ -62,47 +65,68 @@ class ULS24Device:
     def find_device(self):
         """Find and open the ULS24 device"""
         try:
-            # Check for required kernel modules on Linux
-            if sys.platform.startswith('linux'):
-                self.debug_print("Running on Linux, checking kernel modules...")
-                for module in ["usbhid", "hidraw"]:
-                    try:
-                        import subprocess
-                        result = subprocess.run(["lsmod"], stdout=subprocess.PIPE, text=True)
-                        if module not in result.stdout:
-                            self.debug_print(f"Warning: {module} module not loaded!")
-                            print(f"Warning: The {module} kernel module is not loaded. Device may not work properly.")
-                            print(f"You can load it with: sudo modprobe {module}")
-                    except Exception as e:
-                        self.debug_print(f"Error checking for kernel module {module}: {e}")
-            
             # List available devices for debugging
             if self.debug:
-                print("Enumerating all HID devices:")
-                for device_info in hid.enumerate():
-                    print(f"  VID: {device_info['vendor_id']:04x}, "
-                          f"PID: {device_info['product_id']:04x}, "
-                          f"Path: {device_info['path']}")
+                print("Searching for USB devices...")
             
-            # Initialize the device
-            self.debug_print("Initializing HID device...")
-            self.device = hid.device()
-            self.debug_print(f"Looking for device with VID: {self.VENDOR_ID:04x}, PID: {self.PRODUCT_ID:04x}")
-            self.device.open(self.VENDOR_ID, self.PRODUCT_ID)
+            # Find the device by vendor ID and product ID
+            self.device = usb.core.find(idVendor=self.VENDOR_ID, idProduct=self.PRODUCT_ID)
             
-            # Set some device properties
-            self.device.set_nonblocking(0)  # Use blocking mode for simplicity
+            if self.device is None:
+                print(f"Device not found (VID:PID {self.VENDOR_ID:04x}:{self.PRODUCT_ID:04x})")
+                return False
             
-            print(f"Opened device: Manufacturer: {self.device.get_manufacturer_string()}, "
-                  f"Product: {self.device.get_product_string()}")
+            self.debug_print(f"Device found: {self.device}")
+            
+            # Detach kernel driver if it's being used
+            try:
+                if self.device.is_kernel_driver_active(0):
+                    self.debug_print("Detaching kernel driver")
+                    self.device.detach_kernel_driver(0)
+            except Exception as e:
+                self.debug_print(f"Could not detach kernel driver: {e}")
+            
+            # Set configuration
+            self.debug_print("Setting configuration")
+            self.device.set_configuration()
+            
+            # Get active configuration
+            cfg = self.device.get_active_configuration()
+            
+            # Get interface
+            self.interface = cfg[(0,0)]
+            
+            # Find endpoints
+            for ep in self.interface:
+                if usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_OUT:
+                    self.ep_out = ep
+                elif usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN:
+                    self.ep_in = ep
+            
+            if self.ep_out is None or self.ep_in is None:
+                print("Could not find required endpoints")
+                return False
+            
+            self.debug_print(f"Endpoints: OUT={self.ep_out.bEndpointAddress:02x}, IN={self.ep_in.bEndpointAddress:02x}")
+            
+            # Print device information
+            try:
+                manufacturer = usb.util.get_string(self.device, self.device.iManufacturer)
+                product = usb.util.get_string(self.device, self.device.iProduct)
+                print(f"Opened device: Manufacturer: {manufacturer}, Product: {product}")
+            except Exception as e:
+                self.debug_print(f"Error getting device strings: {e}")
+                print("Device opened successfully, but couldn't get string descriptors")
             
             return True
-        except IOError as e:
-            print(f"Error opening device: {e}")
-            traceback.print_exc()
+        except usb.core.USBError as e:
+            print(f"USB Error: {e}")
+            if "Permission denied" in str(e):
+                print("USB permission denied. Try running with sudo or set up udev rules.")
             return False
         except Exception as e:
-            print(f"Unexpected error opening device: {e}")
+            print(f"Unexpected error: {e}")
+            import traceback
             traceback.print_exc()
             return False
     
@@ -110,12 +134,11 @@ class ULS24Device:
         """Close the device"""
         if self.device:
             try:
-                self.debug_print("Closing device")
-                self.device.close()
+                self.debug_print("Releasing USB interface")
+                usb.util.release_interface(self.device, self.interface)
+                self.debug_print("USB interface released")
             except Exception as e:
-                print(f"Error closing device: {e}")
-            finally:
-                self.device = None
+                self.debug_print(f"Error releasing interface: {e}")
     
     def create_command(self, command, data_type, data):
         """Create a command buffer according to the protocol in C++ code"""
@@ -169,100 +192,80 @@ class ULS24Device:
         
         return tx_data
     
-    def write_hid_report(self, tx_data, timeout_ms=1000):
+    def write_usb(self, tx_data, timeout_ms=1000):
         """Write data to device with timeout"""
-        if not self.device:
+        if not self.device or not self.ep_out:
             print("Device not open")
             return False
         
-        # Create output report with report ID 0
-        output_report = bytearray(self.HID_REPORT_SIZE)
-        output_report[0] = 0  # Report ID
-        
-        # Copy the tx_data to output_report (skip the report ID)
-        for i in range(min(len(tx_data), self.TX_BUFFER_SIZE)):
-            output_report[i + 1] = tx_data[i]
-        
-        # Debug print output report
+        # Debug print output data
         if self.debug:
-            hex_data = ' '.join([f"{b:02x}" for b in output_report[:20]])
+            hex_data = ' '.join([f"{b:02x}" for b in tx_data[:20]])
             self.debug_print(f"Writing data: {hex_data}")
         
-        # Send the report with timeout
         try:
-            start_time = time.time()
-            self.device.write(output_report)
-            elapsed = (time.time() - start_time) * 1000
-            if elapsed > timeout_ms:
-                self.debug_print(f"Write took longer than expected: {elapsed:.1f}ms")
-            return True
-        except IOError as e:
-            print(f"Error writing to device: {e}")
+            # In PyUSB, the first byte is not a report ID like in hidapi
+            bytes_written = self.ep_out.write(tx_data, timeout=timeout_ms)
+            self.debug_print(f"Wrote {bytes_written} bytes")
+            return bytes_written > 0
+        except usb.core.USBError as e:
+            print(f"USB Error writing data: {e}")
             return False
     
-    def read_hid_report(self, timeout_ms=5000):
+    def read_usb(self, timeout_ms=5000):
         """Read data from device with timeout"""
-        if not self.device:
+        if not self.device or not self.ep_in:
             print("Device not open")
             return None
         
         try:
             # Read with timeout
             self.debug_print(f"Reading with timeout of {timeout_ms}ms")
-            start_time = time.time()
+            data = self.device.read(self.ep_in.bEndpointAddress, self.RX_BUFFER_SIZE, timeout=timeout_ms)
             
-            # Try to read until timeout
-            while (time.time() - start_time) * 1000 < timeout_ms:
-                # Read the report
-                data = self.device.read(self.HID_REPORT_SIZE, timeout_ms=100)
+            if data:
+                # Debug print received data
+                if self.debug:
+                    hex_data = ' '.join([f"{b:02x}" for b in data[:20]])
+                    self.debug_print(f"Received data: {hex_data}")
                 
-                if data:
-                    elapsed = (time.time() - start_time) * 1000
-                    self.debug_print(f"Read completed in {elapsed:.1f}ms")
-                    
-                    # Debug print received data
-                    if self.debug:
-                        hex_data = ' '.join([f"{b:02x}" for b in data[:20]])
-                        self.debug_print(f"Received data: {hex_data}")
-                    
-                    # Process the received data
-                    rx_data = data[1:]  # Skip report ID
-                    
-                    # Process according to C++ code (ReadHIDInputReport)
-                    if len(rx_data) >= 5:
-                        r_cmd = rx_data[2]
-                        r_type = rx_data[4]
-                        
-                        self.debug_print(f"Received command: {r_cmd:02x}, type: {r_type:02x}")
-                        
-                        if r_cmd == 0x02:  # GetCmd from C++
-                            if r_type in [0x01, 0x02, 0x12, 0x22, 0x32, 0x03]:
-                                self.current_channel = ((r_type & 0xF0) // 16) + 1
-                                
-                                # F1 Code detection
-                                if rx_data[5] in [0x0b, 0xf1]:
-                                    self.continue_flag = False
-                                    if rx_data[5] == 0xf1:
-                                        print("Error code 0xF1. Sensor communication time out.")
-                                        return None
-                                else:
-                                    self.continue_flag = True
-                            elif r_type in [0x07, 0x08, 0x0b]:
-                                if rx_data[5] == 0x17:
-                                    self.continue_flag = False
-                                else:
-                                    self.continue_flag = True
-                    
-                    return rx_data
+                # Process according to C++ code (ReadHIDInputReport)
+                rx_data = bytes(data)
                 
-                # Small delay to prevent CPU hogging
-                time.sleep(0.01)
+                if len(rx_data) >= 5:
+                    r_cmd = rx_data[2]
+                    r_type = rx_data[4]
+                    
+                    self.debug_print(f"Received command: {r_cmd:02x}, type: {r_type:02x}")
+                    
+                    if r_cmd == 0x02:  # GetCmd from C++
+                        if r_type in [0x01, 0x02, 0x12, 0x22, 0x32, 0x03]:
+                            self.current_channel = ((r_type & 0xF0) // 16) + 1
+                            
+                            # F1 Code detection
+                            if rx_data[5] in [0x0b, 0xf1]:
+                                self.continue_flag = False
+                                if rx_data[5] == 0xf1:
+                                    print("Error code 0xF1. Sensor communication time out.")
+                                    return None
+                            else:
+                                self.continue_flag = True
+                        elif r_type in [0x07, 0x08, 0x0b]:
+                            if rx_data[5] == 0x17:
+                                self.continue_flag = False
+                            else:
+                                self.continue_flag = True
+                
+                return rx_data
             
-            self.debug_print(f"Read timeout after {timeout_ms}ms")
+            self.debug_print(f"No data received within timeout")
             return None
         
-        except IOError as e:
-            print(f"Error reading from device: {e}")
+        except usb.core.USBTimeoutError:
+            self.debug_print("USB read timeout")
+            return None
+        except usb.core.USBError as e:
+            print(f"USB Error reading data: {e}")
             return None
     
     def process_row_data(self, rx_data):
@@ -331,11 +334,11 @@ class ULS24Device:
         )
         
         # Send the command
-        result = self.write_hid_report(tx_data)
+        result = self.write_usb(tx_data)
         if result:
             # Read the response with shorter timeout for simple commands
             self.debug_print("Reading response after sensor selection")
-            rx_data = self.read_hid_report(timeout_ms=2000)
+            rx_data = self.read_usb(timeout_ms=2000)
             if rx_data is None:
                 self.debug_print("No response received for sensor selection, continuing anyway")
         return result
@@ -362,11 +365,11 @@ class ULS24Device:
         )
         
         # Send the command
-        result = self.write_hid_report(tx_data)
+        result = self.write_usb(tx_data)
         if result:
             # Read the response with shorter timeout for simple commands
             self.debug_print("Reading response after setting integration time")
-            rx_data = self.read_hid_report(timeout_ms=2000)
+            rx_data = self.read_usb(timeout_ms=2000)
             if rx_data is None:
                 self.debug_print("No response received for integration time, continuing anyway")
         return result
@@ -388,11 +391,11 @@ class ULS24Device:
         )
         
         # Send the command
-        result = self.write_hid_report(tx_data)
+        result = self.write_usb(tx_data)
         if result:
             # Read the response with shorter timeout for simple commands
             self.debug_print("Reading response after setting gain mode")
-            rx_data = self.read_hid_report(timeout_ms=2000)
+            rx_data = self.read_usb(timeout_ms=2000)
             if rx_data is None:
                 self.debug_print("No response received for gain mode, continuing anyway")
         return result
@@ -434,7 +437,7 @@ class ULS24Device:
         tx_data[17] = self.BACKCODE  # 0x17, back code
         
         # Send the command
-        result = self.write_hid_report(tx_data)
+        result = self.write_usb(tx_data)
         if not result:
             return False
         
@@ -448,7 +451,7 @@ class ULS24Device:
             attempts += 1
             self.debug_print(f"Read attempt {attempts}/{max_attempts}")
             
-            rx_data = self.read_hid_report(timeout_ms=5000)
+            rx_data = self.read_usb(timeout_ms=5000)
             if rx_data:
                 self.process_row_data(rx_data)
             else:
@@ -469,7 +472,7 @@ class ULS24Device:
 
 def main():
     """Main function to demonstrate usage"""
-    device = ULS24Device(debug=True)
+    device = ULS24DeviceUSB(debug=True)
     
     if not device.find_device():
         print("Device not found")

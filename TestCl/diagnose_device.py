@@ -135,15 +135,38 @@ def check_hidapi_devices():
         return False
 
 def check_kernel_modules():
-    """Check if necessary kernel modules are loaded"""
+    """Check if necessary kernel modules are loaded, and load them if not"""
     print("\nChecking kernel modules:")
+    modules_to_load = []
+    
     for module in ["usbhid", "hidraw"]:
         loaded, _ = run_command(f"lsmod | grep {module}", False)
         if loaded:
             print(f"? {module} module is loaded")
         else:
             print(f"? {module} module is NOT loaded")
-            print(f"  Recommendation: Try loading with 'sudo modprobe {module}'")
+            modules_to_load.append(module)
+    
+    if modules_to_load:
+        print("\nAttempting to load missing kernel modules...")
+        for module in modules_to_load:
+            print(f"Loading {module}...")
+            try:
+                subprocess.check_call(f"sudo modprobe {module}", shell=True)
+                print(f"? Successfully loaded {module} module")
+            except subprocess.CalledProcessError as e:
+                print(f"? Failed to load {module} module: {e}")
+                print(f"  You may need to install the module or check kernel support.")
+                
+        # Verify modules are now loaded
+        print("\nVerifying modules after loading:")
+        for module in modules_to_load:
+            loaded, _ = run_command(f"lsmod | grep {module}", False)
+            if loaded:
+                print(f"? {module} module is now loaded")
+            else:
+                print(f"? {module} module is still NOT loaded")
+                print(f"  This may indicate missing kernel support for {module}")
 
 def try_open_device():
     """Try to open the device directly"""
